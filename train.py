@@ -117,3 +117,4 @@ if __name__ == "__main__":
     main()
 
 #/data2/atran16/Anaconda_ForTrain/bin/python train.py --model UNet --batch_size 16 --epochs 300 --cityscape_path /data2/atran16/CityScapeSegmentationProject/datasets/data --rs_dir /data2/atran16/CityScapeSegmentationProject/trained_results/unet_run_results
+# xcopy "C:\Users\Dasan\OneDrive\Desktop\cityScapeSegmentationWebsite\CityScapeSegmentation" "C:\Users\Dasan\OneDrive\Desktop\cityScapeSegmentationWebsite\CityScapeSegmentationWebsite" /E /H /Y
