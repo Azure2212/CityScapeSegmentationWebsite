@@ -72,16 +72,6 @@ def load_model_from_url(url: str = WEIGHT_URL) -> torch.nn.Module:
 
 
 def segmentation_prediction(model, img_path: str) -> torch.Tensor:
-    """
-    Run segmentation inference on a single PNG image.
-
-    Args:
-        model:    Loaded UNet model (on DEVICE, eval mode).
-        img_path: Path to a PNG image file.
-
-    Returns:
-        pred_mask: LongTensor of shape (1, H, W) with class indices.
-    """
     model.eval()
     with torch.no_grad():
         img_path = os.path.abspath(img_path)
@@ -95,19 +85,7 @@ def segmentation_prediction(model, img_path: str) -> torch.Tensor:
 
 
 def countObject(pred_mask, class_ids: list = [13], min_area: int = 50):
-    """
-    Count separate objects of a given class in the predicted mask.
-    Ignores regions smaller than min_area pixels.
 
-    Args:
-        pred_mask:  LongTensor of shape (1, H, W).
-        class_ids:  List of class indices to count (default: [13] = car).
-        min_area:   Minimum pixel area to count as a valid object.
-
-    Returns:
-        count:        Number of valid objects found for the last class_id.
-        labeled_mask: Labeled connected-component array for the last class_id.
-    """
     count, labeled_mask = 0, None
     lines = []
     for class_id in class_ids:
@@ -122,16 +100,8 @@ def countObject(pred_mask, class_ids: list = [13], min_area: int = 50):
         lines.append(line)
     return count, labeled_mask, lines
 
-
-# ── Main entry point ───────────────────────────────────────────────────────────
-
 def run(img_path: str):
-    """
-    Full pipeline: stream model from Google Drive → predict → count objects.
 
-    Args:
-        img_path: Path to a PNG image file.
-    """
     # 1. Load model directly from Google Drive (no local file needed)
     model = load_model_from_url()
 

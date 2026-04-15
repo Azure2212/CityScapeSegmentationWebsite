@@ -6,6 +6,7 @@ matplotlib.use("Agg")
 
 import io
 import sys
+import types
 import base64
 import numpy as np
 import cv2
@@ -26,40 +27,48 @@ app = Flask(__name__)
 MODEL_REGISTRY = {
     "UNet": {
         "label": "UNet",
-        "url": "https://drive.google.com/uc?export=download&id=1nGHMD7RMPZOuqYm-9xAStGqJSyI28Gzd",
+        #"url": "https://drive.google.com/uc?export=download&id=1nGHMD7RMPZOuqYm-9xAStGqJSyI28Gzd",
+        "url":"https://drive.google.com/uc?export=download&id=1Lc0hI4WxPoT56syH-SMGUBYU8mSird38",
         "loader": lambda buf: _load_unet(buf, use_cbam=False),
+        "input_size": 224,
     },
-    # "UNet_CBAM": {
-    #     "label": "UNet + CBAM",
-    #     "url": "https://drive.google.com/uc?export=download&id=1NGCwzJ1UR_vmrQQe69j_Lb3XvlKFOtj8",  # add your Drive URL here
-    #     "loader": lambda buf: _load_unet(buf, use_cbam=True),
-    # },
-    # "FCN": {
-    #     "label": "FCN (ResNet-50)",
-    #     "url": "https://drive.google.com/uc?export=download&id=1GtnAoCyQJZUHgfaH9ZAS99YNFd-Roa8f",  # add your Drive URL here
-    #     "loader": lambda buf: _load_generic(buf, load_FCN, num_classes=NUM_CLASSES),
-    # },
-    # "DeepLabV3": {
-    #     "label": "DeepLabV3",
-    #     "url": "https://drive.google.com/uc?export=download&id=1PG6XjfOG4LZn9kARZaBptMcVnojcgB99",  # add your Drive URL here
-    #     "loader": lambda buf: _load_generic(buf, load_DeepLabV3, num_classes=NUM_CLASSES),
-    # },
-    # "LightSeg": {
-    #     "label": "LightSeg",
-    #     "url": "https://drive.google.com/uc?export=download&id=1fMm-yde5QyLAz5ph9FbY9K8gkgI9aii-",  # add your Drive URL here
-    #     "loader": lambda buf: _load_generic(buf, load_LightSeg, num_classes=NUM_CLASSES),
-    # },
-    # "SwinV2B": {
-    #     "label": "SwinV2B",
-    #     "url": "https://drive.google.com/uc?export=download&id=15ZJbxDn7xph7zyXJOBdu417uVv4BIU1T",
-    #     "loader": lambda buf: _load_generic(buf, load_SwinV2B, num_classes=NUM_CLASSES),
-    # },
+    "UNet_CBAM": {
+        "label": "UNet + CBAM",
+        "url": "https://drive.google.com/uc?export=download&id=1NGCwzJ1UR_vmrQQe69j_Lb3XvlKFOtj8",  # add your Drive URL here
+        "loader": lambda buf: _load_unet(buf, use_cbam=True),
+        "input_size": 224,
+    },
+    "FCN": {
+        "label": "FCN (ResNet-50)",
+        "url": "https://drive.google.com/uc?export=download&id=1GtnAoCyQJZUHgfaH9ZAS99YNFd-Roa8f",  # add your Drive URL here
+        "loader": lambda buf: _load_generic(buf, load_FCN, num_classes=NUM_CLASSES),
+        "input_size": 224,
+    },
+    "DeepLabV3": {
+        "label": "DeepLabV3",
+        "url": "https://drive.google.com/uc?export=download&id=1PG6XjfOG4LZn9kARZaBptMcVnojcgB99",  # add your Drive URL here
+        "loader": lambda buf: _load_generic(buf, load_DeepLabV3, num_classes=NUM_CLASSES),
+        "input_size": 224,
+    },
+    "LightSeg": {
+        "label": "LightSeg",
+        "url": "https://drive.google.com/uc?export=download&id=1fMm-yde5QyLAz5ph9FbY9K8gkgI9aii-",  # add your Drive URL here
+        "loader": lambda buf: _load_generic(buf, load_LightSeg, num_classes=NUM_CLASSES),
+        "input_size": 224,
+    },
+    "SwinV2B": {
+        "label": "SwinV2B",
+        "url": "https://drive.google.com/uc?export=download&id=15ZJbxDn7xph7zyXJOBdu417uVv4BIU1T",
+        "loader": lambda buf: _load_generic(buf, load_SwinV2B, num_classes=NUM_CLASSES),
+        "input_size": 256,
+    },
 }
 
 # Cache: model_key -> loaded model
 _model_cache = {}
 
-TEST_TF = A.Compose([A.Resize(224, 224), ToTensorV2()])
+def get_transform(input_size: int):
+    return A.Compose([A.Resize(input_size, input_size), ToTensorV2()])
 
 
 # ── Loaders ────────────────────────────────────────────────────────────────────
@@ -90,10 +99,19 @@ def get_model(key: str):
 
     print(f"Downloading weights for {key} ...")
     buf = io.BytesIO()
-    gdown.download(entry["url"], buf, quiet=False, fuzzy=True)
+    gdown.download(entry["url"], buf, quiet=False)
     buf.seek(0)
 
     model = entry["loader"](buf)
+
+    # Fix inverted NHWC→NCHW condition in SwinV2B._to_bchw
+    if hasattr(model, "_to_bchw"):
+        def _fixed_to_bchw(_, t: torch.Tensor) -> torch.Tensor:
+            if t.ndim == 4 and t.shape[-1] > t.shape[1]:
+                t = t.permute(0, 3, 1, 2).contiguous()
+            return t
+        model._to_bchw = types.MethodType(_fixed_to_bchw, model)
+
     model.to(DEVICE)
     model.eval()
     _model_cache[key] = model
@@ -140,8 +158,10 @@ def predict():
         return jsonify({"error": str(e)}), 400
 
     # Run inference
+    input_size = MODEL_REGISTRY[model_key]["input_size"]
+    tf = get_transform(input_size)
     rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
-    tensor = TEST_TF(image=rgb)["image"].unsqueeze(0).to(DEVICE)
+    tensor = tf(image=rgb)["image"].unsqueeze(0).to(DEVICE)
 
     m.eval()
     with torch.no_grad():
